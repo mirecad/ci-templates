@@ -1,0 +1,79 @@
+#on premise windows build machine
+pool:
+  vmImage: 'windows-latest'
+  name: 'Default'
+
+variables:
+  solution: '**/*.sln'
+  vstsFeed: '236ceb97-cbc2-4f6b-bc66-9a1aed80cbd3'
+  appConfigurationPrefix: 'BoRobot.Rs'
+  appConfigurationLabel: 'build'
+  buildPlatform: 'Any CPU'
+  buildConfiguration: 'Release'
+
+
+#restore and build
+steps:
+- task: DotNetCoreCLI@2
+  displayName: Restore
+  inputs:
+    command: 'restore'
+    projects: '$(solution)'
+    feedsToUse: 'select'
+    vstsFeed: '236ceb97-cbc2-4f6b-bc66-9a1aed80cbd3'
+    includeNuGetOrg: true
+
+- task: DotNetCoreCLI@2
+  displayName: Build
+  inputs:
+    command: 'build'
+    projects: '$(solution)'
+    arguments: '--configuration $(BuildConfiguration)'
+
+
+#load external configuration
+- task: AzureAppConfiguration@3
+  inputs:
+    azureSubscription: 'AzureAppConfiguration'
+    ConfigstoreName: 'InviaItAppsAppConfiguration'
+    KeyFilter: '$(appConfigurationPrefix):*'
+    Label: '$(appConfigurationLabel)'
+    TrimKeyPrefix: '$(appConfigurationPrefix):'
+
+
+#run tests
+- task: DotNetCoreCLI@2
+  displayName: 'Run unit tests'
+  inputs:
+    command: 'test'
+    arguments: '/p:CollectCoverage=true /p:CoverletOutputFormat=cobertura'
+    projects: '**/*UnitTests*.csproj'
+    testRunTitle: 'Unit Tests'
+
+- task: DotNetCoreCLI@2
+  displayName: 'Run unit tests'
+  inputs:
+    command: 'test'
+    projects: '**/*IntegrationTests*.csproj'
+    testRunTitle: 'Integration Tests'
+
+
+#generate, publis test results and coverage
+- task: reportgenerator@4
+  inputs:
+    reports: '$(Build.SourcesDirectory)/**/*.cobertura.xml'
+    targetdir: '$(Build.SourcesDirectory)/CoverageResults'
+
+- task: PublishTestResults@2
+  displayName: 'publish tests'
+  condition: succeededOrFailed()
+  inputs:
+    testResultsFormat: 'VSTest'
+    testResultsFiles: '**/*.trx'
+    failTaskOnFailedTests: true
+
+- task: PublishCodeCoverageResults@1
+  displayName: 'Publish code coverage'
+  inputs:
+    codeCoverageTool: Cobertura
+    summaryFileLocation: '$(Build.SourcesDirectory)/CoverageResults/Cobertura.xml'
